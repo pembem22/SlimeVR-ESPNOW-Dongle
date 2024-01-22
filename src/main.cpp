@@ -24,37 +24,59 @@
 #include <WiFi.h>
 #endif
 
+#define CIRCULAR_BUFFER_INT_SAFE
+#include <CircularBuffer.h>
+
+CircularBuffer<uint8_t, 20000> cbuffer;
+
+static uint8_t MAC[] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+
 // The recipient MAC address. It must be modified for each device.
+// static uint8_t PEER[] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x00};
 static uint8_t PEERS[][6] = {{0xF6, 0xCF, 0xA2, 0x60, 0x8C, 0xE8}, {0x4A, 0x3F, 0xDA, 0x86, 0xA3, 0x07}};
 
 void printReceivedMessage(const uint8_t mac[WIFIESPNOW_ALEN], const uint8_t *buf, size_t count,
                           void *arg)
 {
-  Serial.write(mac, WIFIESPNOW_ALEN);
-  Serial.write(count >> 8);
-  Serial.write(count);
-  Serial.write(buf, count);
-  Serial.flush();
+  auto now = millis();
 
-  digitalWrite(16, LOW);
-  delay(2);
-  digitalWrite(16, HIGH);
+  for (int i = 0; i < WIFIESPNOW_ALEN; i++)
+  {
+    cbuffer.push(mac[i]);
+  }
+  cbuffer.push(count >> 8);
+  cbuffer.push(count);
+  cbuffer.push(now >> 24);
+  cbuffer.push(now >> 16);
+  cbuffer.push(now >> 8);
+  cbuffer.push(now >> 0);
+  for (size_t i = 0; i < count; i++)
+  {
+    cbuffer.push(buf[i]);
+  }
+
+  // digitalWrite(LED_BUILTIN, LOW);
+  // delay(1);
+  // digitalWrite(LED_BUILTIN, HIGH);
 }
 
 void setup()
 {
-  pinMode(16, OUTPUT);
-  digitalWrite(16, HIGH);
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, HIGH);
 
-  Serial.begin(921600);
-  Serial.flush();
+  Serial.begin(115200);
+  // Serial.setRxBufferSize(0);
   // Serial.println();
+
+  wifi_set_macaddr(SOFTAP_IF, MAC);
 
   WiFi.persistent(false);
   WiFi.mode(WIFI_AP);
   WiFi.disconnect();
   WiFi.softAP("ESPNOW", nullptr, 3);
   WiFi.softAPdisconnect(false);
+  WiFi.setSleep(false);
   // WiFi must be powered on to use ESP-NOW unicast.
   // It could be either AP or STA mode, and does not have to be connected.
   // For best results, ensure both devices are using the same WiFi channel.
@@ -116,5 +138,11 @@ void loop()
       len = (Serial.read() << 8) | Serial.read();
       waiting_for_buffer = true;
     }
+  }
+
+  while (!cbuffer.isEmpty())
+  {
+    Serial.write(cbuffer.first());
+    cbuffer.shift();
   }
 }
